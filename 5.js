@@ -1,41 +1,30 @@
 class Bus {
   constructor() {
     this.events = new Map();
-    // 当前事件栈的调用深度
-    this.depth = 0;
     // 保存是否是当前的独立事件栈
     this.isContinue = false;
+    // 保存事件调用栈
+    this.stack = [];
   }
-  addEvent(type, func, isOnce) {
+  // 监听事件
+  listen(type, func) {
     const value = this.events.has(type)
       ? this.events.get(type)
       : this.events.set(type, new Map()).get(type);
     const self = this;
-    function newFunc(...args) {
-      // 当前不是独立的事件调用栈
-      self.isContinue = true;
-      func.call(self, ...args);
-      // 如果是只监听一次，则取消监听
-      if (isOnce) {
-        self.off(type, func);
-      }
-    }
-    newFunc.newName = func.name;
-    value.set(func, newFunc);
-  }
-  // 监听事件
-  listen(type, func) {
-    this.addEvent(type, func, false);
-  }
-  // 监听一次
-  once(type, func) {
-    this.addEvent(type, func, true);
+    value.set(func, func.bind(self));
   }
   // 卸载监听
   off(type, func) {
     if (this.events.has(type)) {
       this.events.get(type).delete(func);
     }
+    this.stack.forEach((item) => {
+      if (type === item.type) {
+        const index = item.callback.indexOf(`bound ${func.name}`);
+        item.callback.splice(index, 1);
+      }
+    });
   }
   // 事件触发
   trigger(type, ...args) {
@@ -43,25 +32,34 @@ class Bus {
       console.error(`未绑定${type}事件`);
     }
     // 设置当前事件调用栈的深度
-    if (!this.isContinue) {
-      this.depth = 0;
-    } else {
-      this.depth += 2;
+    let depth;
+    let callbakArrays = [];
+    let flag = this.stack.some((item, index) => {
+      callbakArrays = item.callback;
+      depth = 2 * index;
+      return item.type === type;
+    });
+    if (!flag) {
+      callbakArrays = [];
+      this.stack.push({ type, callback: callbakArrays });
+      depth = 2 * (this.stack.length - 1);
     }
-    // 打印event事件
-    const strEvent = Array.from({ length: this.depth * 2 }, () => "-").join("");
+    const strEvent = Array.from({ length: depth * 2 }, () => "-").join("");
     console.log(`${strEvent}event:${type}`);
+    // 打印event事件
     for (let value of this.events.get(type).values()) {
-      // 打印callback事件
+      if (callbakArrays.indexOf(value.name) === -1) {
+        callbakArrays.push(value.name);
+      }
       const strCallback = Array.from(
-        { length: (this.depth + 1) * 2 },
+        { length: (depth + 1) * 2 },
         () => "-"
       ).join("");
-      console.log(`${strCallback}callback:${value.newName}`);
+      console.log(`${strCallback}callback:${value.name.slice(5)}`);
       value(...args);
     }
     this.depth++;
-    this.isContinue = false;
+    console.log(this.stack);
   }
 }
 // 难度1
@@ -78,9 +76,6 @@ bus.trigger("testEvent", 1, 2);
 // event callback1 1 2
 // event callback2 1 2
 bus.off("testEvent", fn1);
-bus.once("testEvent", (...argv) => {
-  console.log("callbak once", ...argv);
-});
 bus.trigger("testEvent", 3, 4);
 // event callback2 3 4
 // callbak once 3 4
